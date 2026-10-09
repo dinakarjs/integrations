@@ -43,7 +43,7 @@ class Checks(unittest.TestCase):
         e=Executor(); a={'id':'control','deadline':20,'amount':1}; _,d=e.dispatch(a,10); a['amount']=2
         self.assertFalse(e.commit(a,d,11)['committed'])
     def test_published_proofable_stays_integrity_failed(self):
-        p=Path('fixtures/proofable')
+        p=Path('fixtures/proofable-historical')
         if not p.exists(): self.skipTest('run fetch_fixtures.py first')
         report=proofable(p)
         self.assertEqual(report['integrity'],'FAIL')
@@ -51,7 +51,7 @@ class Checks(unittest.TestCase):
         self.assertEqual(next(c for c in report['cases'] if c['case_id']=='unreachable')['fields']['decision']['state'],'not_applicable')
     def test_mintid_outage_keeps_old_revision(self):
         p=Path('fixtures/mintid')
-        if not p.exists(): self.skipTest('run fetch_fixtures.py first')
+        if not (p / 'revocation-trace-local-20261005T094532Z.manifest.json').exists(): self.skipTest('run fetch_fixtures.py first')
         r=mintid(p,'revocation-trace-local-20261005T094532Z')
         self.assertEqual(r['integrity'],'PASS')
         c=next(c for c in r['cases'] if c['case_id']=='unreachable')
@@ -132,5 +132,56 @@ class CompletenessChecks(unittest.TestCase):
             self.assertEqual(r['integrity'],'FAIL')
             c=next(c for c in r['cases'] if c['case_id']=='binding_veto')
             self.assertEqual(c['fields']['decision']['state'],'not_emitted')
+
+
+
+class CorrectedProofableChecks(unittest.TestCase):
+    def packet(self):
+        p = Path('fixtures/proofable')
+        self.assertTrue(p.exists(), 'corrected pinned fixtures are required')
+        return p
+
+    def test_corrected_packet_verifies(self):
+        report = proofable(self.packet())
+        self.assertEqual(report['integrity'], 'PASS')
+        self.assertTrue(report['envelope_appraisal']['valid'])
+        self.assertEqual(len(report['envelope_appraisal']['verdicts']), 11)
+        self.assertFalse(report['evidence_custody']['independent_target_observer'])
+        self.assertTrue(all(not row['independent_live_reproduction'] for row in report['cases']))
+        unreachable = next(row for row in report['cases'] if row['case_id'] == 'unreachable')
+        self.assertEqual(unreachable['fields']['receipt_signature_verification']['state'], 'not_measured')
+
+    def test_semantic_envelope_mutations_fail(self):
+        import shutil
+        from portable_envelope import qhash
+        for mutation in ('did_address', 'did_chain', 'data', 'signature', 'duplicate', 'missing', 'trace_binding'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as d:
+                target = Path(d) / 'proofable'
+                shutil.copytree(self.packet(), target)
+                path = target / 'portable-proofs.json'
+                envelopes = json.loads(path.read_text())
+                if mutation == 'duplicate':
+                    envelopes[-1] = envelopes[0]
+                elif mutation == 'missing':
+                    envelopes.pop()
+                elif mutation == 'trace_binding':
+                    trace = target / 'trace.jsonl'
+                    rows = [json.loads(line) for line in trace.read_text().splitlines()]
+                    rows[0]['terminal_receipt']['qHash'] = '0x' + '0' * 64
+                    trace.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+                elif mutation == 'signature':
+                    envelopes[0]['signature'] = '0x' + '00' * 65
+                else:
+                    if mutation == 'did_address':
+                        envelopes[0]['did'] = 'did:pkh:eip155:84532:0x' + '1' * 40
+                    elif mutation == 'did_chain':
+                        envelopes[0]['did'] = envelopes[0]['did'].replace(':84532:', ':1:')
+                    else:
+                        envelopes[0]['data']['owner'] = '0x' + '1' * 40
+                    envelopes[0]['qHash'] = qhash(envelopes[0])
+                path.write_text(json.dumps(envelopes))
+                report = proofable(target)
+                self.assertFalse(report['envelope_appraisal']['valid'])
+                self.assertEqual(report['integrity'], 'FAIL')
 
 if __name__=='__main__': unittest.main()
