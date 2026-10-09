@@ -80,6 +80,27 @@ def proofable(base):
         expected, name = line.split(maxsplit=1)
         checks.append(hash_check(base, name.lstrip('* '), expected))
     checks.append(hash_check(base, manifest['public_trace']['file'], manifest['public_trace']['sha256']))
+    envelope_path = base / 'portable-proofs.json'
+    envelope_report = {'state': 'not_measured', 'reason': 'no public envelope file', 'valid': None}
+    if envelope_path.exists():
+        from portable_envelope import verify
+        envelopes = json.loads(envelope_path.read_text())
+        expected = set()
+        for row in trace:
+            receipt = row.get('terminal_receipt') or {}
+            if receipt.get('qHash'): expected.add(receipt['qHash'])
+            expected.update(row.get('authority_decision_qHashes', []))
+            for key in ('authority_decision_qHash', 'next_authority_decision_qHash'):
+                if row.get(key): expected.add(row[key])
+        actual = [e.get('qHash') for e in envelopes]
+        refs = [r.get('qHash') for r in manifest.get('portable_proofs', {}).get('references', [])]
+        verdicts = [{'qHash': e.get('qHash'), **verify(e)} for e in envelopes]
+        bound = (len(envelopes) == len(set(actual)) == len(refs) == len(set(refs))
+                 == manifest.get('portable_proofs', {}).get('count') == len(expected)
+                 and bool(expected) and set(actual) == set(refs) == expected)
+        envelope_report = {'state': 'measured', 'valid': bound and all(v['valid'] for v in verdicts),
+                           'qhash_set_bound': bound, 'verdicts': verdicts,
+                           'scope': 'historical EIP-191 receipt integrity; freshness not appraised'}
     ids = [r['case_id'] for r in trace]
     consistent = len(ids) == len(set(ids)) == manifest['public_trace']['record_count'] and set(ids) == {'hosted_allow', 'binding_veto', 'revoke_before_dispatch', 'expiry_before_dispatch', 'stale_authority', 'post_dispatch_revoke'}
     cases = []
@@ -97,8 +118,8 @@ def proofable(base):
             'committed_effect': field('not_emitted', reason='public trace has platform outcomes, not target-side committed effects'),
             'task_outcome': field('not_emitted', reason='platform observations do not establish the target task result'),
             'receipt': field('measured', [{'attempt': r['case_id'], 'receipt': field('measured', r['terminal_receipt']) if r.get('terminal_receipt') else field('not_emitted', reason='no receipt exposed for this attempt')} for r in relevant]) if relevant else (field('not_applicable') if case == 'unreachable' else field('not_emitted')),
-            'receipt_signature_material': missing('envelope, signature and signer material not in public package'),
-            'receipt_signature_verification': field('not_measured', reason='no public envelope to verify'),
+            'receipt_signature_material': field('measured', {'file': 'portable-proofs.json', 'sha256': digest(envelope_path)}) if relevant and envelope_path.exists() else missing('no envelope material for this case'),
+            'receipt_signature_verification': field('measured', envelope_report) if relevant and envelope_report['state'] == 'measured' else field('not_measured', reason='no envelope verification for this case'),
             'policy_digest': missing('policy version is an identifier, not a canonical digest'),
             'revocation_latency_seconds': field('not_measured'),
             'root_age_seconds': field('not_applicable', reason='local authority-state path'),
@@ -108,12 +129,12 @@ def proofable(base):
                       'independent_live_reproduction': False, 'fields': fields})
     data = (base / 'trace.jsonl').read_bytes()
     crlf = hashlib.sha256(data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')).hexdigest()
-    ok = all(c['match'] for c in checks) and consistent
+    ok = all(c['match'] for c in checks) and consistent and envelope_report['valid'] is not False
     return validate_report({'implementation': 'Proofable', 'run_id': manifest['run_id'],
         'evidence_custody': {'producer': 'Proofable author/operator', 'public_artifact': 'sanitized trace',
                             'appraiser': 'Alakris evidence runner', 'independent_target_observer': False},
         'deployed_revision_claim': manifest['deployed_revision'], 'checks': checks,
-        'integrity': 'PASS' if ok else 'FAIL', 'record_count_consistent': consistent,
+        'integrity': 'PASS' if ok else 'FAIL', 'record_count_consistent': consistent, 'envelope_appraisal': envelope_report,
         'newline_diagnostic': {'crlf_hash_matches_published': crlf == manifest['public_trace']['sha256'],
                                'strict_byte_check_unchanged': True}, 'cases': cases})
 
