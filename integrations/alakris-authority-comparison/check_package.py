@@ -31,7 +31,7 @@ def main():
         (results / filename).write_text(json.dumps(report, indent=2) + '\n')
         if report['integrity'] != 'PASS':
             raise RuntimeError('MintID publisher bytes changed: ' + name)
-    report = proofable(ROOT / 'fixtures/proofable')
+    report = proofable(ROOT / 'fixtures/proofable-historical')
     (results / 'proofable-author.json').write_text(json.dumps(report, indent=2) + '\n')
     mismatches = [c for c in report['checks'] if not c['match']]
     # Both SHA256SUMS and manifest assert the same trace hash. Preserve both failures.
@@ -40,9 +40,13 @@ def main():
     known = len(mismatches) == 2 and all(c['file'] == 'trace.jsonl' and c['expected'] == expected and c['actual'] == actual for c in mismatches)
     if report['integrity'] != 'FAIL' or not known or not report['record_count_consistent']:
         raise RuntimeError('Pinned Proofable evidence changed; review rather than replace expected hashes')
+    corrected = proofable(ROOT / 'fixtures/proofable')
+    (results / 'proofable-author-oct8.json').write_text(json.dumps(corrected, indent=2) + '\n')
+    if corrected['integrity'] != 'PASS' or corrected['envelope_appraisal']['valid'] is not True:
+        raise RuntimeError('Corrected Proofable appraisal failed')
     subprocess.run([sys.executable, 'create_references.py', '--lock', 'fixtures/download-lock.json', '--output', 'results/trace-reference-shapes.json'], cwd=ROOT, check=True)
     print(json.dumps({'package_checks': 'PASS', 'mintid_author_bytes': 'PASS',
-                      'proofable_author_bytes': 'FAIL', 'known_failure_preserved': True,
+                      'proofable_author_bytes': 'FAIL', 'known_failure_preserved': True, 'proofable_oct8_bytes_and_envelopes': 'PASS',
                       'independent_comparison_completed': False}))
 
 if __name__ == '__main__':
