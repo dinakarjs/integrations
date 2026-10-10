@@ -7,6 +7,11 @@ from pathlib import Path
 
 STATES = {"measured", "not_applicable", "not_emitted", "not_measured"}
 CASES = ("binding_veto", "revoked_stale", "unreachable", "post_dispatch_revoke")
+REQUIRED_FIELDS = frozenset(
+    json.loads(Path(__file__).with_name("comparison-contract.json").read_text())[
+        "required_fields"
+    ]
+)
 
 
 def field(state, value=None, reason=None):
@@ -91,15 +96,17 @@ def refusal_observation(path):
     }
 
 
-def validate_report(report):
-    ids = [c["case_id"] for c in report["cases"]]
-    if len(ids) != 4 or set(ids) != set(CASES):
-        raise ValueError("exactly four unique case IDs are required")
-    for case in report["cases"]:
-        if case["case_id"] not in CASES:
-            raise ValueError("unknown case")
-        for key, item in case["fields"].items():
-            field(item["state"], item["value"], item.get("reason"))
+def unobserved_context_fields():
+    """Adapters explicitly disclose unavailable context before validation."""
+    return {
+        key: field(
+            "not_measured"
+            if key in {"independent_effect_witness", "retry_count", "duplicate_count"}
+            else "not_emitted",
+            reason="appraisal not performed"
+            if key in {"independent_effect_witness", "retry_count", "duplicate_count"}
+            else "not exposed by this public adapter input",
+        )
         for key in (
             "action_digest",
             "target_identity",
@@ -108,21 +115,27 @@ def validate_report(report):
             "independent_effect_witness",
             "retry_count",
             "duplicate_count",
-        ):
-            metric = key in (
-                "independent_effect_witness",
-                "retry_count",
-                "duplicate_count",
+        )
+    }
+
+
+def validate_report(report):
+    ids = [c["case_id"] for c in report["cases"]]
+    if len(ids) != 4 or set(ids) != set(CASES):
+        raise ValueError("exactly four unique case IDs are required")
+    for case in report["cases"]:
+        if case["case_id"] not in CASES:
+            raise ValueError("unknown case")
+        missing = REQUIRED_FIELDS.difference(case["fields"])
+        if missing:
+            raise ValueError(
+                "missing required fields for "
+                + case["case_id"]
+                + ": "
+                + ", ".join(sorted(missing))
             )
-            case["fields"].setdefault(
-                key,
-                field(
-                    "not_measured" if metric else "not_emitted",
-                    reason="appraisal not performed"
-                    if metric
-                    else "not exposed by this public adapter input",
-                ),
-            )
+        for key, item in case["fields"].items():
+            field(item["state"], item["value"], item.get("reason"))
         if (
             case.get("independent_live_reproduction")
             and case["basis"] != "independent_run"
@@ -215,6 +228,7 @@ def proofable(base):
             return field("not_emitted", reason=why)
 
         fields = {
+            **unobserved_context_fields(),
             "authority": field(
                 "measured", [r.get("delegation_qHash") for r in relevant]
             )
@@ -365,6 +379,7 @@ def mintid(base, name):
             return field("not_applicable", reason=why)
 
         fields = {
+            **unobserved_context_fields(),
             "dispatch": na("MintID has no executor"),
             "committed_effect": na("relying-party boundary"),
             "task_outcome": na("relying-party task outcome is outside MintID"),
