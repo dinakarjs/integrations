@@ -13,6 +13,63 @@ from runner import (
     refusal_observation,
 )
 from reference_adapter import Executor, run_cases
+from runner import CASES, REQUIRED_FIELDS
+
+
+def complete_report():
+    return {
+        "cases": [
+            {
+                "case_id": case,
+                "fields": {key: field("not_emitted") for key in REQUIRED_FIELDS},
+                "basis": "author_record",
+                "independent_live_reproduction": False,
+            }
+            for case in CASES
+        ]
+    }
+
+
+class RequiredFieldChecks(unittest.TestCase):
+    def test_each_required_field_omission_rejected_without_mutation(self):
+        for case_index, case_id in enumerate(CASES):
+            for key in REQUIRED_FIELDS:
+                with self.subTest(case=case_id, field=key):
+                    report = complete_report()
+                    del report["cases"][case_index]["fields"][key]
+                    before = json.dumps(report, sort_keys=True)
+                    with self.assertRaisesRegex(ValueError, key):
+                        validate_report(report)
+                    self.assertEqual(json.dumps(report, sort_keys=True), before)
+
+    def test_authority_and_decision_omission_rejected(self):
+        report = complete_report()
+        del report["cases"][0]["fields"]["authority"]
+        del report["cases"][0]["fields"]["decision"]
+        with self.assertRaisesRegex(ValueError, "authority, decision"):
+            validate_report(report)
+
+    def test_empty_fields_rejected(self):
+        report = complete_report()
+        report["cases"][0]["fields"] = {}
+        with self.assertRaisesRegex(ValueError, "missing required fields"):
+            validate_report(report)
+
+    def test_explicit_unavailable_states_accepted_without_mutation(self):
+        for state in ("not_emitted", "not_measured", "not_applicable"):
+            with self.subTest(state=state):
+                report = complete_report()
+                for case in report["cases"]:
+                    case["fields"] = {key: field(state) for key in REQUIRED_FIELDS}
+                before = json.dumps(report, sort_keys=True)
+                self.assertIs(validate_report(report), report)
+                self.assertEqual(json.dumps(report, sort_keys=True), before)
+
+    def test_complete_measured_fields_accepted(self):
+        report = complete_report()
+        for case in report["cases"]:
+            case["fields"] = {key: field("measured", False) for key in REQUIRED_FIELDS}
+        self.assertIs(validate_report(report), report)
 
 
 class Checks(unittest.TestCase):
@@ -50,22 +107,8 @@ class Checks(unittest.TestCase):
                 relative_file(Path(d), "../outside")
 
     def test_author_evidence_cannot_be_independent(self):
-        report = {
-            "cases": [
-                {
-                    "case_id": c,
-                    "fields": {},
-                    "basis": "author_record",
-                    "independent_live_reproduction": True,
-                }
-                for c in [
-                    "binding_veto",
-                    "revoked_stale",
-                    "unreachable",
-                    "post_dispatch_revoke",
-                ]
-            ]
-        }
+        report = complete_report()
+        report["cases"][0]["independent_live_reproduction"] = True
         with self.assertRaisesRegex(ValueError, "author records"):
             validate_report(report)
 
