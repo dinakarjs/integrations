@@ -5,15 +5,20 @@ import json
 from pathlib import Path
 import urllib.request
 
-PROOFABLE = '3a45f026fd0c06b9d1d411c053597584b6b1c3dc'
+PROOFABLE = '9851059900e29ba701bb0f4df2bf89a2107f430c'
+HISTORICAL_PROOFABLE = '3a45f026fd0c06b9d1d411c053597584b6b1c3dc'
 MINTID = 'b678e5cd6b5736e1795fd18d497fd8e501272dcd'
 RECORDS = ['revocation-trace-testnet-20261006T073712Z', 'revocation-trace-local-20261005T094532Z']
 
 def fetch(out):
     files = {}
-    proof_path = 'public/evidence/aaif/authority-at-dispatch/2026-10-06/'
+    proof_path = 'public/evidence/aaif/authority-at-dispatch/2026-10-08/'
     for name in ['README.md', 'SHA256SUMS', 'manifest.json', 'trace.jsonl', 'authority-effect-results.json', 'authority-effect-results.md']:
         files['proofable/' + name] = f'https://raw.githubusercontent.com/proofable/docs/{PROOFABLE}/{proof_path}{name}'
+    for name in ['portable-proofs.json', 'verify-portable-proofs.mjs']:
+        files['proofable/' + name] = f'https://raw.githubusercontent.com/proofable/docs/{PROOFABLE}/{proof_path}{name}'
+    for name in ['README.md', 'SHA256SUMS', 'manifest.json', 'trace.jsonl', 'authority-effect-results.json', 'authority-effect-results.md']:
+        files['proofable-historical/' + name] = f'https://raw.githubusercontent.com/proofable/docs/{HISTORICAL_PROOFABLE}/public/evidence/aaif/authority-at-dispatch/2026-10-06/{name}'
     for record in RECORDS:
         for suffix in ['.jsonl', '.md', '.manifest.json']:
             files['mintid/' + record + suffix] = f'https://gitlab.com/mintid/mintid/-/raw/{MINTID}/test-harness/trace/records/{record}{suffix}'

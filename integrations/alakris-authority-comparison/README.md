@@ -13,7 +13,7 @@ python3.12 -m venv .venv
 .venv/bin/python check_package.py --fetch
 ```
 
-The single check command downloads pinned fixtures, runs the tests, writes both author appraisals, preserves the expected Proofable hash failure, and validates TRACE reference shapes. To rerun individual stages:
+The single check command downloads pinned fixtures, runs the tests, writes author appraisals, verifies the corrected Proofable packet, preserves the historical Proofable hash failure, and validates TRACE reference shapes. To rerun individual stages:
 
 ```sh
 .venv/bin/python fetch_fixtures.py --out fixtures
@@ -23,11 +23,11 @@ The single check command downloads pinned fixtures, runs the tests, writes both 
   --record revocation-trace-testnet-20261006T073712Z --output results/mintid-author-testnet.json
 .venv/bin/python runner.py mintid --evidence fixtures/mintid \
   --record revocation-trace-local-20261005T094532Z --output results/mintid-author-local.json
-.venv/bin/python runner.py proofable --evidence fixtures/proofable --output results/proofable-author.json
+.venv/bin/python runner.py proofable --evidence fixtures/proofable --output results/proofable-author-oct8.json
 .venv/bin/python create_references.py --lock fixtures/download-lock.json --output results/trace-reference-shapes.json
 ```
 
-The Proofable appraisal command intentionally exits **1** for the pinned Proofable package's published-byte checksum mismatch. `results/proofable-author.json` retains the failing digest and LF/CRLF diagnostic. Never update an expected publisher digest to make a run green.
+The corrected Proofable command exits **0** only when the checksums, trace inventory and offline envelope appraisal pass. The separate historical packet at `fixtures/proofable-historical` still exits **1** for its published-byte checksum mismatch. `results/proofable-author.json` retains the failing digest and LF/CRLF diagnostic. Never update an expected publisher digest to make a run green.
 
 `fetch_fixtures.py` downloads immutable source URLs and emits a download lock. Vendor evidence remains in its source repository; downloaded fixtures are not redistributed by this integration.
 
@@ -52,7 +52,9 @@ The synthetic executor rechecks expiry and revocation at commit, binds issued di
 
 `trace_references.behavior_reference()` uses released `agentrust-trace`'s `Reference.model_validate` with `rel: behavior-trace` and a raw-byte SHA-256 digest. It validates pointer shape only. No Trust Record or attestation is issued. A reference digest proves byte identity, not enforcement, effect, freshness or a signature. The contribution is an `external-evidence-source` and claims no TRACE conformance level.
 
-Proofable qHashes and private receipt labels do not supply a verifiable envelope. Signature verification is `not_measured`; signature material is `not_emitted` in the public package. Its revocation latency is unmeasured and target-side effects lack an independent witness.
+The corrected Proofable Oct 8 packet discloses 11 portable envelopes. The adapter recomputes qHashes, recovers EIP-191 signers with DID/chain binding, and requires exact qHash-set equality across trace, manifest references and envelopes. This measures historical receipt integrity; current freshness remains unappraised. The unreachable case has no applicable receipt to verify. Revocation latency remains unmeasured and target-side effects lack an independent witness.
+
+The verifier is vendored unchanged from the reviewed reader revision `2b54ee47491f0d1a86c7d9f47d434f8f02622043`; see `PORTABLE_ENVELOPE_NOTICE.txt` and its retained Apache-2.0 license. `fixtures/proofable` uses docs commit `9851059900e29ba701bb0f4df2bf89a2107f430c`. `fixtures/proofable-historical` preserves the earlier `3a45f026` packet, and `results/proofable-author.json` preserves its checksum FAIL. New results are written separately to `results/proofable-author-oct8.json`.
 
 ## Native implementation runs
 
@@ -67,9 +69,9 @@ This exercises presentation refusal, refresh and control paths; it does not exec
 
 ## Review requests
 
-- Chris: correct the public trace digests and expose a complete offline-verifiable envelope or a public reproducible sandbox procedure. Retain sanitized trace, author custody, unmeasured latency and absent target witness.
+- Chris: corrected public digests and offline envelopes are appraised for the Oct 8 packet. Independent live reproduction remains open; retain sanitized trace, author custody, unmeasured latency and absent target witness.
 - Marc: rerun the disconnected-authority case on the current verifier; publish veto evidence and keep unavailable/protected-effect boundaries explicit.
 - Sankalp and other reviewers: review field states and propose an observer adapter for actual committed effects.
 - Imran: review runner/adapter placement and the pointer bridge. Maintainers set listing tier; no verification badge is requested before review/reproduction.
 
-Further work: implementation-side dispatch/effect adapters, an independent observer, a matched same-input run, public receipt verification, and the current-build outage run. This initial PR exposes those gaps rather than marking them complete.
+Further work: implementation-side dispatch/effect adapters, an independent observer, a matched same-input run, independent live reproduction, and the current-build outage run. This initial PR exposes those gaps rather than marking them complete.
