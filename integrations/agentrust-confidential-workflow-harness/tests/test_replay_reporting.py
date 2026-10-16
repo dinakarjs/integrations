@@ -1,8 +1,9 @@
 """Keep status observations and signed channel attribution claims explicit."""
 import copy
 import unittest
-from run_remote_ca2a_matrix import exact_replay_observation
+
 import test_replay_export as replay_fixture
+from run_remote_ca2a_matrix import exact_replay_observation
 
 
 class ReplayReportingTests(unittest.TestCase):
