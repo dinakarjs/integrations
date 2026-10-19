@@ -26,7 +26,7 @@ trace_roles:
   - record-consumer
 trace_conformance_level: 0
 tested_against:
-  agentrust-trace: "0.10.0"
+  agentrust-trace: "0.11.0"
   agentrust-trace-tests: "0.5.1"
   # The schema records agentrust-io package keys only. The fixed job in
   # .github/workflows/chap-conformance.yml also pins chap-coordinator 0.2.13, the

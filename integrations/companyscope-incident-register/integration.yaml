@@ -16,4 +16,4 @@ marketplace:
   mark: AIR
   keywords: [incidents, liability, pre-deployment-review, case-law]
 tested_against:
-  agent-manifest: "0.12.0"
+  agent-manifest: "0.15.0"
