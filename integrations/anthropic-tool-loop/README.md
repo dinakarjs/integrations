@@ -7,8 +7,8 @@ itself) as [AgenTrust Telemetry](https://github.com/agentrust-io/agentrust-telem
 governance events, and signs one TRACE v0.2 record per finished run. There is no
 framework to hook into here, so the loop calls the recorder explicitly.
 
-The code this package was generalised from runs in production in front of two
-Slack operations agents, an ERP/purchasing agent and a sales-operations agent.
+The included offline example and tests establish the software behavior described
+below; independent production-deployment evidence is not included.
 
 ## Two parts
 
@@ -212,3 +212,16 @@ The repository-root workflow
 else installed, then on 3.11 to 3.13 installs the released packages, runs the
 tests and the interop test, emits a record with the offline example, and runs
 `trace-tests verify --level 0`.
+
+### Recorder recovery boundary
+
+The recorder persists the opened spool file identity and resets its offset when
+that identity changes or the file becomes shorter. This covers replacement files,
+including replacements larger than the previous offset, across restarts. Legacy
+state without a file identity retains its offset on first upgrade; operators must
+ensure the spool has not been replaced before that first poll. In-place rewriting
+that preserves file identity and does not shrink is not detected.
+
+A malformed or failed run is logged and dropped under the existing failure policy;
+it is not returned as successfully recorded. Other runs continue. This is not a
+retry queue or a guarantee of exactly-once evidence persistence after partial writes.

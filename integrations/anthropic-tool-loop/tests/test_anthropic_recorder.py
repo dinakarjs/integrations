@@ -302,6 +302,47 @@ def test_a_malformed_run_is_logged_and_does_not_stop_the_others(env, caplog):
     good = _clean_run(env)
     with caplog.at_level("ERROR", logger="anthropic_tool_loop_trace.recorder"):
         done = env.rec.poll()
-    assert set(done) == {bad, good.id}
+    assert set(done) == {good.id}
     assert env.rec.run(good.id)["run"]["signed"] and env.rec.run(bad) is None
     assert any(bad in r.getMessage() for r in caplog.records)
+
+
+def test_malformed_timestamp_does_not_block_other_runs_or_restart(env):
+    bad = _clean_run(env)
+    good = _clean_run(env)
+    path = pathlib.Path(env.spool)
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    for row in rows:
+        if row["run_id"] == bad.id:
+            row["t"] = "invalid"
+            row["end"] = "invalid"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert env.rec.poll() == [good.id]
+    assert env.rec.run(bad.id) is None
+    assert env.make().poll() == []
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_same_or_larger_replacement_spool_is_read(env, restart):
+    first = _clean_run(env)
+    assert env.rec.poll() == [first.id]
+    path = pathlib.Path(env.spool)
+    old_size = path.stat().st_size
+    path.rename(path.with_suffix(".old"))
+    second = _clean_run(env)
+    with path.open("a") as stream:
+        stream.write("\n" * old_size)
+    rec = env.make() if restart else env.rec
+    assert rec.poll() == [second.id]
+    assert rec.run(second.id) is not None
+
+
+def test_failed_record_is_not_reported_as_done(env, monkeypatch):
+    run = _clean_run(env)
+
+    def fail(*args, **kwargs):
+        raise OSError("test write failure")
+
+    monkeypatch.setattr(env.rec, "record", fail)
+    assert env.rec.poll() == []
+    assert env.rec.run(run.id) is None

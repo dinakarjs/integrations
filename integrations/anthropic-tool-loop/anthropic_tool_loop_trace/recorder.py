@@ -171,12 +171,14 @@ class Recorder:
         self._lock = threading.Lock()
         saved = json.loads(self._state_path.read_text()) if self._state_path.exists() else {}
         self.offset = int(saved.get("offset", 0))
+        self._spool_identity = saved.get("spool_identity")
         self.pending: dict[str, list[dict]] = saved.get("pending", {})
 
     # -- spool -----------------------------------------------------------------------------
     def _save_state(self):
         tmp = self._state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"offset": self.offset, "pending": self.pending}))
+        tmp.write_text(json.dumps({"offset": self.offset, "pending": self.pending,
+                                   "spool_identity": self._spool_identity}))
         os.replace(tmp, self._state_path)
 
     def poll(self, final: bool = False) -> list[str]:
@@ -184,9 +186,15 @@ class Recorder:
         everything still pending. Returns the run ids recorded."""
         done: list[str] = []
         if self.spool.exists():
-            if self.spool.stat().st_size < self.offset:  # rotated or truncated
-                self.offset = 0
             with self.spool.open("rb") as fh:
+                stat = os.fstat(fh.fileno())
+                identity = [stat.st_dev, stat.st_ino]
+                # Inspect the opened file, not an earlier path stat. Persist its
+                # identity so equal/larger replacements are detected on restart.
+                if ((self._spool_identity is not None and identity != self._spool_identity)
+                        or stat.st_size < self.offset):
+                    self.offset = 0
+                self._spool_identity = identity
                 fh.seek(self.offset)
                 chunk = fh.read()
             usable = chunk[: chunk.rfind(b"\n") + 1]  # never consume a half-written line
@@ -208,15 +216,17 @@ class Recorder:
                 self.pending.setdefault(run_id, []).append(row)
         now = time.time_ns()
         for run_id, rows in list(self.pending.items()):
-            ended = any(r["kind"] == "run.end" for r in rows)
-            last = max(int(r.get("end") or r.get("t") or 0) for r in rows)
-            if ended or final or now - last > self.idle_seconds * 1_000_000_000:
-                try:
-                    self.record(rows, complete=ended)
-                except Exception:
-                    _log.exception("recording %s failed; its rows are dropped", run_id)
+            try:
+                ended = any(r["kind"] == "run.end" for r in rows)
+                last = max(int(r.get("end") or r.get("t") or 0) for r in rows)
+                if not (ended or final or now - last > self.idle_seconds * 1_000_000_000):
+                    continue
+                self.record(rows, complete=ended)
+            except Exception:
+                _log.exception("recording %s failed; its rows are dropped", run_id)
+            else:
                 done.append(run_id)
-                del self.pending[run_id]
+            del self.pending[run_id]
         self._save_state()
         return done
 
