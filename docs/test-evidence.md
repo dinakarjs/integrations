@@ -49,3 +49,16 @@ tiers, compatibility floors, or maintainer approval requirements.
 The recorder tests exercise real subprocess success, failure and timeout plus
 missing evidence, changed manifests, mismatched versions/revisions and log
 substitution. Run `python -m pytest tests/test_test_evidence.py -q`.
+
+The proposed expansion wraps the existing Google ADK and LlamaIndex test commands.
+It preserves their dependency installation, fixture-only execution and tiers.
+Google ADK inherits TRACE from the first installation pass; LlamaIndex uses its
+existing exact interop requirements. LlamaIndex additionally installs the existing
+hash-locked maintenance dependency (PyYAML) for the recorder. Both jobs retain
+receipts/logs for 30 days and run the consistency check even after command failure.
+A stale declaration is a failing result, not grounds to skip the check.
+
+Local reproduction for this expansion: Google ADK 40 tests pass with TRACE
+0.11.0 and trace-tests 0.5.1; its prior 0.10.0 declaration is corrected to the
+observed version. LlamaIndex 63 tests pass with its existing TRACE 0.9.0 and
+trace-tests 0.5.1 declaration. No tier or compatibility floor changes.
