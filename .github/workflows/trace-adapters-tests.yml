@@ -12,6 +12,7 @@ on:
       - "integrations/openshell/**"
       - "integrations/openai-agents/**"
       - "scripts/test_evidence.py"
+      - "requirements/maintenance.txt"
       - "requirements/adapters*.in"
       - "requirements/adapters*.txt"
       - "requirements/sdk-*.in"
@@ -29,6 +30,7 @@ on:
       - "integrations/openshell/**"
       - "integrations/openai-agents/**"
       - "scripts/test_evidence.py"
+      - "requirements/maintenance.txt"
       - "requirements/adapters*.in"
       - "requirements/adapters*.txt"
       - "requirements/sdk-*.in"
@@ -200,7 +202,24 @@ jobs:
       - name: Test released FunctionAgent workflow observation
         run: |
           pip install -r integrations/llamaindex/requirements-interop.txt
-          python -m pytest integrations/llamaindex -q
+          python -m pip install --require-hashes -r requirements/maintenance.txt
+          python scripts/test_evidence.py capture \
+            --integration integrations/llamaindex \
+            --output "$RUNNER_TEMP/llamaindex-evidence" \
+            --evidence-class synthetic \
+            -- python -m pytest integrations/llamaindex -q
+
+      - name: Check llamaindex execution receipt
+        if: always()
+        run: python scripts/test_evidence.py check "$RUNNER_TEMP/llamaindex-evidence"
+      - name: Retain llamaindex receipt and log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: llamaindex-execution-evidence
+          path: ${{ runner.temp }}/llamaindex-evidence/
+          retention-days: 30
+          if-no-files-found: warn
 
   openai-agents-adapter:
     # Two passes, on purpose. The first proves record construction and the
@@ -240,7 +259,22 @@ jobs:
       - name: Test released Google ADK interoperability and evidence rules
         run: |
           pip install --require-hashes -r requirements/sdk-google-adk.txt
-          python -m pytest \
+          python scripts/test_evidence.py capture \
+            --integration integrations/google-adk \
+            --output "$RUNNER_TEMP/google-adk-evidence" \
+            --evidence-class synthetic \
+            -- python -m pytest \
             integrations/google-adk/test_google_adk_to_trace.py \
-            integrations/google-adk/test_google_adk_interop.py \
-            -q
+            integrations/google-adk/test_google_adk_interop.py -q
+
+      - name: Check google-adk execution receipt
+        if: always()
+        run: python scripts/test_evidence.py check "$RUNNER_TEMP/google-adk-evidence"
+      - name: Retain google-adk receipt and log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: google-adk-execution-evidence
+          path: ${{ runner.temp }}/google-adk-evidence/
+          retention-days: 30
+          if-no-files-found: warn
