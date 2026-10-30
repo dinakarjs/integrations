@@ -26,6 +26,8 @@ from wcm import (
     WeightCustodyManifest,
     combine_shares,
     generate_ed25519,
+    generate_transport_keypair,
+    open_sealed,
     split_secret,
 )
 
@@ -105,12 +107,16 @@ def build_manifest(weights_hash: str) -> dict:
 
 def attested_share(kbs: KeyBrokerService, manifest: WeightCustodyManifest) -> Share:
     """Release one share from an independent shareholder's KBS against attestation."""
+    transport_private, transport_public = generate_transport_keypair()
     challenge = kbs.issue_challenge()
     evidence = SoftwareProvider().produce(
-        challenge, serving_image_measurement=SERVING, gpu_measurement="nvidia-rim:demo-golden"
+        challenge, serving_image_measurement=SERVING, gpu_measurement="nvidia-rim:demo-golden",
+        transport_public_key=transport_public
     )
     decision = kbs.verify_and_release(manifest, evidence)
-    return unpack(decision.key)
+    if not decision.released or decision.key is not None or decision.sealed_key is None:
+        raise RuntimeError("expected a channel-bound sealed share release")
+    return unpack(open_sealed(decision.sealed_key, transport_private))
 
 
 def main() -> None:

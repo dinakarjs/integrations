@@ -25,6 +25,7 @@ from wcm import (
     VerificationContext,
     WeightCustodyManifest,
     generate_ed25519,
+    generate_transport_keypair,
     is_root,
     verify_lineage,
     verify_manifest,
@@ -114,13 +115,14 @@ def sign(manifest: WeightCustodyManifest, keypair, role: str, signer: str) -> di
     return Ed25519Signer(keypair).sign(manifest.unsigned_dict(), role=role, signer=signer)
 
 
-def _release(kbs: KeyBrokerService, manifest: WeightCustodyManifest, serving: str):
+def _release(kbs: KeyBrokerService, manifest: WeightCustodyManifest, serving: str, transport_public_key: str):
     """Issue a fresh single-use challenge, produce evidence, run the gate."""
     challenge = kbs.issue_challenge()
     evidence = SoftwareProvider().produce(
         challenge,
         serving_image_measurement=serving,
         gpu_measurement="nvidia-rim:demo-golden",
+        transport_public_key=transport_public_key,
     )
     return kbs.verify_and_release(manifest, evidence)
 
@@ -165,7 +167,12 @@ def main() -> None:
         {base.weights_hash: b"the-model-decryption-key"},
         trusted_manifest_identities=[manifest_identity(base)],
     )
-    print("gate released key  :", _release(kbs, base, serving).released)
+    # Software demonstration only: the recipient retains the transport private key.
+    transport_private, transport_public = generate_transport_keypair()
+    decision = _release(kbs, base, serving, transport_public)
+    if not decision.released or decision.key is not None or decision.sealed_key is None:
+        raise RuntimeError("expected a channel-bound sealed release")
+    print("gate released key  :", decision.released)
     print("enforced: genuine attestation nonce, approved platform, and a serving")
     print("image measurement matching what the builder signed.")
 
@@ -199,7 +206,9 @@ def main() -> None:
     print("lineage verified   :", lineage.ok, " depth", lineage.depth, " root is a base:", is_root(base))
 
     rule("What this is, and is not")
-    session = EnclaveSession.from_release(base, _release(kbs, base, serving))
+    session = EnclaveSession.from_release(
+        base, decision, transport_private_key=transport_private
+    )
     session.use_key()
     print("custody active     : key held under a", cadence, "cadence, wiped on lapse",
           "(time_floor " + session.time_floor.value + ")")

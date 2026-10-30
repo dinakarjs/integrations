@@ -24,6 +24,8 @@ from wcm import (
     VerificationContext,
     WeightCustodyManifest,
     generate_ed25519,
+    generate_transport_keypair,
+    open_sealed,
     verify_manifest,
 )
 
@@ -78,10 +80,11 @@ def sign(manifest: WeightCustodyManifest, keypair, role: str, signer: str) -> di
     return Ed25519Signer(keypair).sign(manifest.unsigned_dict(), role=role, signer=signer)
 
 
-def _evidence(kbs: KeyBrokerService, serving: str):
+def _evidence(kbs: KeyBrokerService, serving: str, transport_public_key: str):
     challenge = kbs.issue_challenge()
     return SoftwareProvider().produce(
-        challenge, serving_image_measurement=serving, gpu_measurement="nvidia-rim:demo-golden"
+        challenge, serving_image_measurement=serving, gpu_measurement="nvidia-rim:demo-golden",
+        transport_public_key=transport_public_key
     )
 
 
@@ -100,6 +103,12 @@ def main() -> None:
         weights_hash=weights_hash, serving=serving,
         builder_id="frontier-labs", custodian_id="sovereign-customer",
     )
+    # This software-only example cannot verify a hardware quote or GPU report.
+    # Make the same explicit mock-profile choice as demos 6 and 9; keep the
+    # KBS channel-binding requirement enabled. Never use this profile in production.
+    doc["release_policy"]["require_evidence_verification"] = False
+    doc["release_policy"]["required_gpu_measurement"]["require_cc_mode"] = False
+    print("mock profile        : hardware quote/GPU verification waived; channel binding required")
     manifest = WeightCustodyManifest.model_validate(doc)
     manifest = manifest.with_signatures([
         sign(manifest, builder, "builder", "frontier-labs"),
@@ -120,13 +129,19 @@ def main() -> None:
         {weights_hash: b"the-model-decryption-key"},
         trusted_manifest_identities=[manifest_identity(manifest)],
     )
-    released = kbs.verify_and_release(manifest, _evidence(kbs, serving)).released
+    transport_private, transport_public = generate_transport_keypair()
+    decision = kbs.verify_and_release(manifest, _evidence(kbs, serving, transport_public))
+    if not decision.released or decision.key is not None or decision.sealed_key is None:
+        raise RuntimeError("expected a channel-bound sealed release")
+    if open_sealed(decision.sealed_key, transport_private) != b"the-model-decryption-key":
+        raise RuntimeError("recipient did not recover the expected key")
+    released = decision.released
     print("approved enclave    : key released =", released)
     print("-> the weights decrypt only inside the measured stack, never on the host.")
 
     rule("3. An unapproved serving stack gets nothing")
     tampered_serving = sha256(b"a modified serving stack with a raw-weight export path")
-    denied = kbs.verify_and_release(manifest, _evidence(kbs, tampered_serving))
+    denied = kbs.verify_and_release(manifest, _evidence(kbs, tampered_serving, transport_public))
     print("unapproved enclave  : key released =", denied.released)
     print("why                 :", next(c.detail for c in denied.failures))
     print("-> a stack that could exfiltrate plaintext weights never receives the key.")
